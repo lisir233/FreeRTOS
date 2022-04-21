@@ -1454,7 +1454,578 @@ Task3是一个事件驱动的任务，执行时优先级相对较低，但高于
 
 图30展示了合作调度器的行为。图30中的水平虚线显示了任务处于“准备就绪”状态的时间。
 
+![image-20220421164708756](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421164708756.png)
 
+参见图30：
 
-改变了文档
+1.任务1
+
+任务1的优先级最高。它以阻塞状态开始，等待一个信号量。在时间t3，一个中断给出信号量，导致任务1离开阻塞状态并进入准备状态（第6章将介绍来自中断的信号量）。在时间t3，一个中断给出信号量，导致任务1离开阻塞状态并进入准备状态（第6章将介绍来自中断的信号量）。
+
+在时间t3时，任务1是最高优先级的准备状态任务，如果使用了抢占调度器，任务1将成为运行状态任务。然而，因为目前正在使用合作调度程序，任务1一直处于“就绪”状态，直到t4，此时运行状态任务调用taskYIELD()
+
+2.任务2
+
+任务2的优先级介于任务1和任务3的优先级之间。它以阻塞状态开始，等待任务3在时间t2发送给它的消息。
+
+在时间t2，任务2是最高优先级的准备状态任务，如果使用了先发制人的调度器，任务2将成为运行状态任务。但是，当使用合作调度程序时，任务2仍然处于就绪状态，直到运行状态任务进入调用taskYIELD()的阻塞状态。
+
+运行状态任务在时间t4时调用taskYIELD()，但是此时任务1是最高优先级的就绪状态任务，所以任务2在时间t5时任务1实际上不会重新进入阻塞状态时才成为运行状态任务。在时间t6，任务2重新进入阻塞状态以等待下一个消息，此时任务3再次成为最高优先级的就绪状态任务。
+
+在处理多任务的应用程序中，应用程序编写器必须注意到多个任务不会同时访问资源，因为同时访问可能会破坏资源。例如，考虑以下场景，其中被访问的资源是一个UART（串行端口）。两个任务是向UART写入字符串；任务1写“abcdefghijklmnop库”，任务2写“123456789”：
+
+1. 任务1处于“正在运行”状态，并开始写入其字符串。它向UART写入“abcdefg”，但在编写任何其他字符之前离开运行状态。
+2. 任务2进入运行状态，并在离开运行状态之前向UART写入“123456789”写入UART。
+3. 任务1重新进入“正在运行”状态，并将其字符串的其余字符写入UART。
+
+在这种情况下，实际上写给UART的是“abcdefg123456789hijklmnop”。Task1写入的字符串并没有按照预期的完整顺序写入UART，而是已经损坏，因为Task2写入UART的字符串出现在其中。
+
+通常在使用协同调度器时比在使用优先调度器时更容易避免同时访问所引起的问题1：
+
+- 当使用优先级调度程序时，运行状态任务可以随时被抢占，包括当它与另一个任务共享的资源处于不一致状态时。正如UART示例所示，让资源处于不一致的状态可能会导致数据损坏。
+- 当使用协作调度程序时，应用程序编写器控制何时可能发生切换到另一个任务。因此，应用程序写入器可以确保在资源处于不一致状态时不会切换到另一个任务。
+- 在上面的UART示例中，应用程序编写器可以确保Task1在其整个字符串写入UART之前不会离开运行状态，这样就消除了字符串因激活另一个任务而损坏的可能性。
+
+如图30所示，当使用协同调度器时，系统的响应性将低于当使用先发制人的调度器时：
+
+- 当使用先发制人的调度程序时，调度程序将立即开始运行一个任务，使该任务成为最高优先级的就绪状态任务。这在必须在定义的时间段内响应高优先级事件的实时系统中通常是必不可少的。.
+- 当使用协作调度程序时，不会切换到已成为最高优先级的任务，并执行就绪状态任务，直到正在运行状态任务进入已阻止状态或调用taskYIELD()
+
+### 4.队列管理
+
+#### 4.1章节简介及范围
+
+“队列”提供了任务到任务、任务到中断和中断到任务的通信机制
+
+**简介**
+
+本章旨在让读者能够很好地理解：
+
+- 如何创建一个队列。
+- 队列如何管理其包含的数据。
+- 如何将数据发送到队列。
+- 如何从队列中接收数据。
+- 阻塞一个队列意味着什么。
+- 如何阻止多个队列。
+- 如何覆盖队列中的数据。
+- 如何清除一个队列。
+- 当写入队列和阅读队列时，任务优先级的影响。
+
+本章中只介绍了任务到任务的通信。第6章介绍了任务中断和中断到任务通信。
+
+#### 4.2队列的特征
+
+**数据存储**
+
+一个队列可以包含有限数量的固定大小的数据项。一个队列可以保存的最大项数称为它的“长度”。在创建队列时，将设置每个数据项的长度和大小。
+
+队列通常用作第一输出(FIFO)缓冲区，其中数据被写入队列的末端（尾部）并从队列的前端（头）删除。图31演示了从正在用作FIFO的队列中写入和读取的数据。也可以写入队列的前面，并覆盖已经在队列前面的数据。
+
+![image-20220421172021034](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421172021034.png)
+
+有两种方式可以实现队列行为：
+
+1.拷贝
+
+复制队列意味着发送到队列的数据将字节一个字节复制到队列中。
+
+2.引用 
+
+引用队列意味着队列只持有指向发送到队列的数据的指针，而不是数据本身。
+
+FreeRTOS通过复制方法使用队列。复制队列被认为比引用队列更强大和更容易使用，因为：
+
+- 堆栈变量可以直接发送到队列，即使该变量在声明它的函数退出后将不存在。
+
+- 可以将数据发送到队列，而不需要首先分配一个缓冲区来保存数据，然后将数据复制到已分配的缓冲区中
+
+- 发送任务可以立即重用已发送到队列的变量或缓冲区。
+
+- 发送任务和接收任务是完全解耦合的——应用程序设计者不需要关心哪个任务“拥有”数据，或者哪个任务负责释放数据。
+
+- 复制队列并不阻止队列也被用于引用队列。例如，当正在排队的数据的大小使将数据复制到队列中显得不现实时，那么就可以将指向数据的指针复制到队列中。
+
+- RTOS完全负责分配用于存储数据的内存。
+
+- 在一个内存保护系统中，任务可以访问的RAM将受到限制。在这种情况下，只有在发送和接收任务都可以访问存储数据的RAM时，才能使用引用队列。复制队列不施加这种限制；内核始终以完全的特权运行，允许使用队列跨内存保护边界传递数据。
+
+  
+
+**通过多个任务访问**
+
+队列本身是任何知道其存在的任务或ISR都可以访问的对象。任意数量的任务都可以写入同一队列，任意数量的任务都可以从同一队列中读取。在实践中，队列有多个写入器很常见，但队列有多个读取器就不常见了。
+
+**阻塞队列读取**
+
+当一个任务尝试从队列中读取时，它可以选择指定一个“块”时间。如果队列已为空，则此时该任务将保持在阻塞状态，以等待队列中的数据可用的时间。处于“阻止”状态的任务，等待数据从队列中可用时，当另一个任务或中断将数据放入队列时，将自动移动到“就绪”状态。如果指定的块时间在数据可用之前过期，则任务也将自动从“阻止”状态移动到“就绪”状态。
+
+队列可以有多个读取器，因此单个队列可能阻止多个任务等待数据。在这种情况下，当数据可用时，只有一个任务将被解除阻塞。未解除阻塞的任务将始终是等待数据的最高优先级任务。如果被阻止的任务具有相同的优先级，那么等待数据时间最长的任务将被阻塞。
+
+**阻塞队列写入**
+
+正如从队列中读取时一样，任务可以在写入队列时选择指定块时间。在这种情况下，如果队列已经满，块时间是任务在阻塞状态下等待队列上的空间可用的最大时间。队列可以有多个写入器，因此一个完整的队列可能会阻塞多个任务，等待完成一个发送操作。在这种情况下，当队列上的空间可用时，只有一个任务将被解除阻塞。未解除阻塞的任务将始终是等待空间的最高优先级任务。如果被阻止的任务具有相同的优先级，那么等待空间最长的任务将被阻止。
+
+**在多个队列上阻塞**
+
+可以将队列分组为集合，允许任务进入“阻止”状态，等待数据在集中的任何队列上可用。队列集在第4.6节“从多个队列接收”中进行了演示。
+
+#### 4.3使用队列
+
+**xQueueCreate() 函数功能 **
+
+必须显式创建队列。
+
+队列由句柄引用，它们是QueueHandle_t类型的变量。创建()API函数将创建一个队列，并返回一个引用它所创建的队列的QueueHandle_t。
+
+FreeRTOSV9.0.0还包括xQueueCreateStatic()函数，该函数分配在编译时静态创建队列所需的内存：
+
+FreeRTOS在创建队列时从FreeRTOS堆中分配RAM。RAM用于保存队列数据结构和包含在队列中的项。如果没有足够的堆RAM，Create()将返回NULL。第2章提供了关于FreeRTOS堆的更多信息。
+
+![image-20220421201602505](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421201602505.png)
+
+**xQueueCreate()参数和返回值** 
+
+| **Parameter Name** | **Description**                                              |
+| ------------------ | ------------------------------------------------------------ |
+| uxQueueLength      | 所创建的队列在任何时候都可以保存的最大项目数。               |
+| uxItemSize         | 可以存储在队列中的每个数据项的字节大小。                     |
+| Return Value       | 如果返回NULL，则无法创建队列，因为FreeRTOS没有足够的堆内存来分配队列数据结构和存储区域。   返回的非null值表示队列已成功创建。返回的值应该存储为已创建队列的句柄。 |
+
+在创建了一个队列后，可以使用xQueueReset()API函数将该队列返回到其原来的空状态。
+
+**xQueueSendToBack() and xQueueSendToFront() 函数功能**
+
+正如预期的那样， xQueueSendToBack()用于将数据发送到队列的背面（尾部），而 xQueueSendToFront()用于将数据发送到队列的前端（头）。
+
+xQueueSend()功能和xQueueSendToBack()完全相同。
+
+注意：永远不要在中断服务调用*xQueueSendToFront()* 或*xQueueSendToBack()* ，中断安全版本 xQueueSendToFrontFromISR()和xQueueSendToBackFromISR()可以用于中断中。这些内容将在第6章中进行描述。
+
+![image-20220421202749588](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421202749588.png)
+
+表19.xQueueSendToFront()和 xQueueSendToBack()函数参数和返回值
+
+| Parameter Name/Returned Value | Description                                                  |
+| ----------------------------- | ------------------------------------------------------------ |
+| xQueue                        | 发送数据的队列的句柄（写入）。队列句柄将从对用于创建队列的xQueueCreate()的调用中返回。 |
+| pvItemToQueue                 | 一个指向要复制到队列中的数据的指针。在创建队列时设置了队列可以保存的每个项的大小，因此这些字节将从pvItemtoqueue复制到队列存储区域中。 |
+| xTicksToWait                  | 如果队列已满，则任务应保持在“阻塞”状态以等待队列上的空间可用的最长时间。如果排队等待为零，且队列已经满，那么排队发送前()和排队发送备份()都将立即返回。绝对时间以滴答周期指定，因此它所表示的绝对时间取决于滴答频率。宏pdMS_TO_TICKS()可用于将以毫秒为单位指定的时间转换为在刻度中指定的时间。将值设置为 portMAX_DELAY将导致任务无限期等待（不超时）。如果INCLUDE_vTaskSuspend在FreeRTOSConfig.h中被设置为1。 |
+| Returned value                | 有两个可能的返回值：1.pdPASS  只有当数据被成功地发送到队列时，才会返回PdPASS。如果指定了块时间(xTicksToWait不是零)，则可能将调用任务放入阻塞状态，等待函数返回之前空间在队列中可用，但数据在块时间过期之前成功写入队列。 2.errQUEUE_FULL  如果由于队列已满，数据无法写入队列，则将返回errQUEUE_FULL。如果指定了块时间(xTicksToWait不是零)，那么调用任务将被放置入阻塞状态，等待另一个任务或中断在队列中腾出空间，直到指定的时间到达。 |
+
+**xQueueReceive() API功能**
+
+xQueueReceive() 用于接收从队列中（读取）的项目。接收到的项目将从队列中删除
+
+注意：永远不要从中断服务例程调用xQueueReceive()。xQueueReceiveFromISR()函数在第6章中描述。
+
+![image-20220421210452603](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421210452603.png)
+
+**表20.xQueueReceive()函数参数和返回值**
+
+| 参数名称/返回值 | **Description**                                              |
+| --------------- | ------------------------------------------------------------ |
+| xQueue          | 正在接收数据的队列的句柄（正在读取）。队列句柄将从对用于创建队列的xQueueCreate()的调用中返回。 |
+| pvBuffer        | 指向将接收到的数据复制到的内存的指针。在创建队列时，将设置队列所持有的每个数据项的大小。pvBuffer所指向的内存必须至少大到足以容纳那么多个字节。 |
+| xTicksToWait    | 如果队列已为空，则任务应保持在阻塞状态以等待数据在队列中成为可用的最长时间量。如果xtickso等待为零，那么如果队列已经为空，x查询接收()将立即返回。如果xtickso等待为零，那么如果队列已经为空，xQueueReceive()将立即返回。方块时间以滴答周期指定，因此它所表示的绝对时间取决于滴答频率。宏pdMS_TO_TICKS()可用于将以毫秒为单位指定的时间转换为在刻度中指定的时间。如果INCLUDE_vTaskSuspend在FreeRTOSConfig.h中设置为1，则将xto等设置为portMAX_DELAY将导致任务无限期等待（不超时）。 |
+| Returned value  | 有两个可能的返回值：1.pdPASS 只有在从队列中成功读取数据时，才会返回PdPASS。如果指定了块时间(xTicksToWait不是零)，则可能将调用任务置于“阻塞”状态，等待数据在队列中可用，但在块时间过期之前成功从队列读取数据。2.errQUEUE_EMPTY 如果由于队列已经为空，因此无法从队列中读取数据，则将返回errQUEUE_EMPTY。如果指定了块时间(xTicksToWait不是零)，那么调用任务将被放置入阻塞状态，等待另一个任务或中断将数据发送到队列，但块时间在此发生之前已经过期。 |
+
+**uxQueueMessagesWaiting() API 功能**
+
+uxQueueMessagesWaiting() 用于查询当前在队列中的项目的数量。
+
+注意：不要从中断服务例程调用uxQueueMessagesWaiting()应该使用中断安全的uxQueueMessagesWaitingFromISR()来代替它。
+
+**表21.uxQueueMessagesWaiting()函数参数和返回值**
+
+| Parameter Name/Returned Value | Description                                                  |
+| ----------------------------- | ------------------------------------------------------------ |
+| xQueue                        | 要查询的队列的句柄。队列句柄将从对用于创建队列的xQueueCreate()的调用中返回。 |
+| Returned value                | 正在查询的队列当前保留的项目数。如果返回0，则该队列为空      |
+
+例子10 从队列接收时阻塞
+
+本示例演示了创建队列、从多个任务发送到队列以及从队列接收的数据。创建的队列用于保存int32_t类型的数据项。发送到队列的任务不指定块时间，而从队列接收到的任务则不指定块时间。
+
+发送到队列的任务的优先级低于从队列接收到的任务的优先级。这意味着队列不应该包含超过一个项目，因为一旦数据被发送到队列，接收任务将解除阻塞，预先阻止发送任务，并删除数据——使队列再次为空。
+
+listing 45显示了写入队列的任务的实现。将创建此任务的两个实例，一个将值100连续写入该队列，另一个将值200连续写入同一队列。任务参数用于将这些值传递到每个任务实例中。
+
+```c
+/*Listing 45. Implementation of the sending task used in Example 10.*/
+static void vSenderTask( void *pvParameters )
+{
+int32_t lValueToSend;
+BaseType_t xStatus;
+ /* Two instances of this task are created so the value that is sent to the
+ queue is passed in via the task parameter - this way each instance can use 
+ a different value. The queue was created to hold values of type int32_t, 
+ so cast the parameter to the required type. */
+ lValueToSend = ( int32_t ) pvParameters;
+ /* As per most tasks, this task is implemented within an infinite loop. */
+ for( ;; )
+ {
+ /* Send the value to the queue.
+ The first parameter is the queue to which data is being sent. The 
+ queue was created before the scheduler was started, so before this task
+ started to execute.
+ The second parameter is the address of the data to be sent, in this case
+ the address of lValueToSend.
+ The third parameter is the Block time – the time the task should be kept
+ in the Blocked state to wait for space to become available on the queue
+ should the queue already be full. In this case a block time is not 
+ specified because the queue should never contain more than one item, and
+ therefore never be full. */
+ xStatus = xQueueSendToBack( xQueue, &lValueToSend, 0 );
+ if( xStatus != pdPASS )
+ {
+ /* The send operation could not complete because the queue was full -
+ this must be an error as the queue should never contain more than 
+ one item! */
+ vPrintString( "Could not send to the queue.\r\n" );
+ }
+ } 
+}
+
+/*Listing 46. Implementation of the receiver task for Example 10*/
+static void vReceiverTask( void *pvParameters )
+{
+/* Declare the variable that will hold the values received from the queue. */
+int32_t lReceivedValue;
+BaseType_t xStatus;
+const TickType_t xTicksToWait = pdMS_TO_TICKS( 100 );
+ /* This task is also defined within an infinite loop. */
+ for( ;; )
+ {
+ /* This call should always find the queue empty because this task will
+ immediately remove any data that is written to the queue. */
+ if( uxQueueMessagesWaiting( xQueue ) != 0 )
+ {
+ vPrintString( "Queue should have been empty!\r\n" );
+ }
+ /* Receive data from the queue.
+ The first parameter is the queue from which data is to be received. The
+ queue is created before the scheduler is started, and therefore before this
+ task runs for the first time.
+ The second parameter is the buffer into which the received data will be
+ placed. In this case the buffer is simply the address of a variable that
+ has the required size to hold the received data.
+ The last parameter is the block time – the maximum amount of time that the
+ task will remain in the Blocked state to wait for data to be available 
+ should the queue already be empty. */
+ xStatus = xQueueReceive( xQueue, &lReceivedValue, xTicksToWait );
+ if( xStatus == pdPASS )
+ {
+ /* Data was successfully received from the queue, print out the received
+ value. */
+ vPrintStringAndNumber( "Received = ", lReceivedValue );
+ }
+ else
+ {
+ /* Data was not received from the queue even after waiting for 100ms.
+ This must be an error as the sending tasks are free running and will be
+ continuously writing to the queue. */
+ vPrintString( "Could not receive from the queue.\r\n" );
+ }
+ } }
+/* Declare a variable of type QueueHandle_t. This is used to store the handle
+to the queue that is accessed by all three tasks. */
+QueueHandle_t xQueue;
+int main( void )
+{
+ /* The queue is created to hold a maximum of 5 values, each of which is
+ large enough to hold a variable of type int32_t. */
+ xQueue = xQueueCreate( 5, sizeof( int32_t ) );
+ if( xQueue != NULL )
+ {
+ /* Create two instances of the task that will send to the queue. The task
+ parameter is used to pass the value that the task will write to the queue,
+ so one task will continuously write 100 to the queue while the other task 
+ will continuously write 200 to the queue. Both tasks are created at
+ priority 1. */
+ xTaskCreate( vSenderTask, "Sender1", 1000, ( void * ) 100, 1, NULL );
+ xTaskCreate( vSenderTask, "Sender2", 1000, ( void * ) 200, 1, NULL );
+ /* Create the task that will read from the queue. The task is created with
+ priority 2, so above the priority of the sender tasks. */
+ xTaskCreate( vReceiverTask, "Receiver", 1000, NULL, 2, NULL );
+ /* Start the scheduler so the created tasks start executing. */
+ vTaskStartScheduler();
+ }
+ else
+ {
+ /* The queue could not be created. */
+ }
+ 
+ /* If all is well then main() will never reach here as the scheduler will 
+ now be running the tasks. If main() does reach here then it is likely that 
+ there was insufficient FreeRTOS heap memory available for the idle task to be 
+ created. Chapter 2 provides more information on heap memory management. */
+ for( ;; );
+}
+```
+
+Listing 46显示了从队列接收数据的任务的实现。接收任务指定了100毫秒的块时间，因此将进入阻塞状态，等待数据可用。当队列中的任何一个数据可用，或者经过100毫秒后没有数据可用时，它将离开阻塞状态。在本例中，100毫秒超时永远不会过期，因为有两个任务连续不断写入队列。
+
+Listing 47包含了main()函数的定义。这只是在启动调度程序之前创建队列和三个任务。创建队列最多包含5个int32_t值，因为任务的优先级设置，队列一次不会包含超过一个项。
+
+![image-20220421220331565](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421220331565.png)
+
+![image-20220421220521695](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421220521695.png)
+
+#### 4.4从多个来源接收数据
+
+在FreeRTOS设计中，为一个任务从多个源接收数据是很常见的。接收任务需要知道数据来自哪里，以确定应该如何处理数据。一个简单的设计解决方案是使用单个队列来传输在结构的字段中包含的数据值和数据源的结构。该方案如图34所示。
+
+![image-20220421220658112](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421220658112.png)
+
+参见图34：
+
+- 创建一个包含Data_t类型结构的队列。结构成员允许数据值和枚举类型，指示在一条消息中将数据发送到队列。
+- 中央控制器任务用于执行主系统功能。这必须对在队列上传递到它的系统状态的输入和更改做出反应。
+- CAN总线任务用于封装CAN总线接口功能。当CAN总线任务接收到并解码了一条消息时，它将已经解码过的消息发送到Data_t结构中的控制器任务。传输结构中的eDataID成员用于让控制器任务知道数据是什么——在描述的情况下，它是一个电机速度值。使用传输结构中的lDataValue成员，让控制器任务知道实际的电机转速值。
+- 一个人机界面(HMI)任务用于封装所有的HMI功能。机器操作员可能会输入命令和查询速度方法，必须在HMI任务中检测和解释。当输入一个新命令时，HMI任务将该命令以Data_t结构发送给控制器任务。传输结构中的eDataID成员用于让控制器任务知道数据是什么——在描述的情况下，它是一个新的设定点值。传输结构中的lDataValue成员用于让控制器任务知道实际的设定点值。
+
+**例11.在发送到队列和发送队列上的结构时发生阻塞**
+
+示例11与示例10相似，但是任务优先级相反，因此接收任务的优先级低于发送任务。此外，队列还用于传递结构，而不是传递整数。
+
+listing48显示了示例11所使用的结构的定义。
+
+```c
+/*Listing 48. The definition of the structure that is to be passed on a queue, plus the 
+declaration of two variables for use by the example*/
+/* Define an enumerated type used to identify the source of the data. */
+typedef enum
+{
+ eSender1,
+ eSender2
+} DataSource_t;
+/* Define the structure type that will be passed on the queue. */
+typedef struct
+{
+ uint8_t ucValue;
+ DataSource_t eDataSource;
+} Data_t;
+/* Declare two variables of type Data_t that will be passed on the queue. */
+static const Data_t xStructsToSend[ 2 ] =
+{
+ { 100, eSender1 }, /* Used by Sender1. */
+ { 200, eSender2 } /* Used by Sender2. */
+};
+```
+
+在示例10中，接收任务具有最高的优先级，因此该队列从不包含超过一个项目。这是由于一旦数据放入队列中，接收任务就会了发送任务。在示例11中，发送任务具有更高的优先级，因此队列通常将已满。这是因为，一旦接收任务从队列中删除一个项目，它就会被一个发送任务抢占，该任务会立即重新填充队列。然后，发送任务重新进入“阻塞”状态，等待队列中的空间再次可用。
+
+listing49显示了发送任务的实现。发送任务指定了100毫秒的块时间，因此每次队列变满时，它都进入阻塞状态，等待空间可用。当队列中有一个空间可用，或者100毫秒后没有空间可用时，它将离开“阻塞”状态。在本例中，100毫秒的超时应该永远不会过期，因为接收任务通过从队列中删除项目来不断地腾出空间。
+
+```c
+/*Listing 49. The implementation of the sending task for Example 11*/
+static void vSenderTask( void *pvParameters )
+{
+BaseType_t xStatus;
+const TickType_t xTicksToWait = pdMS_TO_TICKS( 100 );
+ /* As per most tasks, this task is implemented within an infinite loop. */
+ for( ;; )
+ {
+ /* Send to the queue.
+ The second parameter is the address of the structure being sent. The
+ address is passed in as the task parameter so pvParameters is used 
+ directly.
+ The third parameter is the Block time - the time the task should be kept
+ in the Blocked state to wait for space to become available on the queue
+ if the queue is already full. A block time is specified because the
+ sending tasks have a higher priority than the receiving task so the queue
+ is expected to become full. The receiving task will remove items from 
+ the queue when both sending tasks are in the Blocked state. */
+ xStatus = xQueueSendToBack( xQueue, pvParameters, xTicksToWait );
+ if( xStatus != pdPASS )
+ {
+ /* The send operation could not complete, even after waiting for 100ms.
+ This must be an error as the receiving task should make space in the 
+ queue as soon as both sending tasks are in the Blocked state. */
+ vPrintString( "Could not send to the queue.\r\n" );
+ }
+ }
+ }
+```
+
+接收任务具有最低的优先级，因此只有在两个发送任务都处于阻塞状态时，它才会运行。发送任务将只在队列已满时进入阻塞状态，因此接收任务将只在队列已经已满时执行。因此，即使没有指定块时间，它也总是期望接收数据。
+
+```c
+/*Listing 50. The definition of the receiving task for Example 11*/
+static void vReceiverTask( void *pvParameters )
+{
+/* Declare the structure that will hold the values received from the queue. */
+Data_t xReceivedStructure;
+BaseType_t xStatus;
+ /* This task is also defined within an infinite loop. */
+ for( ;; )
+ {
+ /* Because it has the lowest priority this task will only run when the
+ sending tasks are in the Blocked state. The sending tasks will only enter
+ the Blocked state when the queue is full so this task always expects the
+ number of items in the queue to be equal to the queue length, which is 3 in
+ this case. */
+ if( uxQueueMessagesWaiting( xQueue ) != 3 )
+ {
+ vPrintString( "Queue should have been full!\r\n" );
+ }
+ /* Receive from the queue.
+ The second parameter is the buffer into which the received data will be
+ placed. In this case the buffer is simply the address of a variable that
+ has the required size to hold the received structure. 
+ The last parameter is the block time - the maximum amount of time that the
+ task will remain in the Blocked state to wait for data to be available 
+ if the queue is already empty. In this case a block time is not necessary 
+ because this task will only run when the queue is full. */
+ xStatus = xQueueReceive( xQueue, &xReceivedStructure, 0 );
+ if( xStatus == pdPASS )
+ {
+ /* Data was successfully received from the queue, print out the received
+ value and the source of the value. */
+ if( xReceivedStructure.eDataSource == eSender1 )
+ {
+ vPrintStringAndNumber( "From Sender 1 = ", xReceivedStructure.ucValue );
+ }
+ else
+ {
+ vPrintStringAndNumber( "From Sender 2 = ", xReceivedStructure.ucValue );
+ }
+ }
+ else
+ {
+ /* Nothing was received from the queue. This must be an error as this 
+ task should only run when the queue is full. */
+ vPrintString( "Could not receive from the queue.\r\n" );
+ }
+ } 
+}
+
+```
+
+main()与前面的示例相比变化略有变化。创建该队列以保存三个Data_t结构，并反转发送和接收任务的优先级。main()的实现如Listing51所示。
+
+```c
+/* Listing 51. The implementation of main() for Example 11 */
+int main( void )
+{
+ /* The queue is created to hold a maximum of 3 structures of type Data_t. */
+ xQueue = xQueueCreate( 3, sizeof( Data_t ) );
+ if( xQueue != NULL )
+ {
+ /* Create two instances of the task that will write to the queue. The
+ parameter is used to pass the structure that the task will write to the 
+ queue, so one task will continuously send xStructsToSend[ 0 ] to the queue
+ while the other task will continuously send xStructsToSend[ 1 ]. Both 
+ tasks are created at priority 2, which is above the priority of the receiver. */
+ xTaskCreate( vSenderTask, "Sender1", 1000, &( xStructsToSend[ 0 ] ), 2, NULL );
+ xTaskCreate( vSenderTask, "Sender2", 1000, &( xStructsToSend[ 1 ] ), 2, NULL );
+ /* Create the task that will read from the queue. The task is created with
+ priority 1, so below the priority of the sender tasks. */
+ xTaskCreate( vReceiverTask, "Receiver", 1000, NULL, 1, NULL );
+ /* Start the scheduler so the created tasks start executing. */
+ vTaskStartScheduler();
+ }
+ else
+ {
+ /* The queue could not be created. */
+ }
+ 
+ /* If all is well then main() will never reach here as the scheduler will 
+ now be running the tasks. If main() does reach here then it is likely that 
+ there was insufficient heap memory available for the idle task to be created. 
+ Chapter 2 provides more information on heap memory management. */
+ for( ;; );
+}
+```
+
+示例11所产生的输出如图35所示
+
+![image-20220421222155695](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421222155695.png)
+
+Figure 36演示了由于发送任务的优先级高于接收任务的优先级而导致的执行顺序。表22提供了对Figure 36的进一步解释，并描述了为什么前四条消息来自同一个任务。
+
+![image-20220421222256861](C:\Users\86178\Desktop\RTOS\${pic}\image-20220421222256861.png)
+
+**Table 22.Figure 36 的关键点**
+
+| Time | Description                                                  |
+| ---- | ------------------------------------------------------------ |
+| t1   | 任务发送者1执行并发送3个数据项。                             |
+| t2   | 队列已满，因此发送人1进入阻塞状态，等待其下一次发送完成。任务发送者2现在是能够运行的最高优先级任务，因此进入“运行”状态 |
+| t3   | 任务发送者2发现队列已满，因此进入阻塞止状态，等待其第一次发送完成。任务接收器现在是能够运行的最高优先级任务，因此进入“运行”状态。 |
+| t4   | 两个优先级高于接收任务优先级的任务正在等待队列上的可用空间，导致任务接收器一旦从队列中删除一个项目就被抢占。任务发件人1和发件人2具有相同的优先级，因此**调度器选择等待时间最长的任务**作为将进入运行状态的任务——在此情况下是任务发送人1 |
+| t5   | 任务发送者1将向该队列发送另一个数据项。队列中只有一个空格，因此任务发送方1进入被阻止状态，等待其下一次发送完成。任务接收器同样是能够运行的最高优先级任务，因此会进入运行状态。任务发送方1现在已向该队列发送了四个项，而任务发送方2仍在等待将其第一个项发送到该队列。 |
+| t6   | 两个优先级高于接收任务优先级的任务正在等待队列中的可用空间，因此一旦任务接收器从队列中删除一个项目，就会被抢占。这次发件人2等待的时间比发件人1长，因此发件人2进入“运行”状态。 |
+| t7   | 任务发送者2会将一个数据项发送到该队列。队列中只有一个空余，因此发送人2进入阻止状态，等待下一次发送完成。任务发送器1和发件人2都在等待队列中变为可用空间，因此任务接收器是唯一可以进入“正在运行”状态的任务。 |
+
+#### 4.5使用大型或可变大小的数据
+
+**队列指针**
+
+如果存储在队列中的数据的大小很大，那么最好使用队列来传输指向数据的指针，而不是将数据本身逐字节地复制到队列中。传输指针在处理时间和创建队列所需的RAM数量方面都更有效。但是，在排队的指针时，必须非常小心地确保：
+
+1. 被指向的RAM的所有者已被明确定义。  当通过指针在任务之间共享内存时，必须确保两个任务不会同时修改内存内容，或者采取任何其他可能导致内存内容无效或不一致的操作。理想情况下，只允许发送任务访问内存，直到指向内存的指针已经等待，然后在从队列接收到指针后，只允许接收任务访问内存。
+2. 被指向的RAM仍然有效。如果被指向的内存是动态分配的，或者是从预先分配的缓冲区池中获得的，那么应该只有一个任务负责释放内存。在释放内存后，任何任务都不应尝试访问该内存。指针不应被用于访问已分配到任务堆栈上的数据。在堆栈帧发生更改后，该数据将无效。
+
+通过示例，Listing52、Listing53和Listing54演示了如何使用队列将指向缓冲区的指针从一个任务发送到另一个任务：
+
+- Listing52创建了一个最多可以容纳5个指针的队列。
+- Listing53分配一个缓冲区，将写入缓冲区字符串，然后将指向缓冲区的指针发送到队列。
+- Listing54从队列接收一个指向缓冲区的指针，然后打印缓冲区中包含的字符串。
+
+```c
+/**Listing 52. Creating a queue that holds pointers**/
+/* Declare a variable of type QueueHandle_t to hold the handle of the queue being created. */
+QueueHandle_t xPointerQueue;
+/* Create a queue that can hold a maximum of 5 pointers, in this case character pointers. */
+xPointerQueue = xQueueCreate( 5, sizeof( char * ) );
+
+/**Listing 53. Using a queue to send a pointer to a buffer**/
+/* A task that obtains a buffer, writes a string to the buffer, then sends the address of the 
+buffer to the queue created in Listing 52. */
+void vStringSendingTask( void *pvParameters )
+{
+char *pcStringToSend;
+const size_t xMaxStringLength = 50;
+BaseType_t xStringNumber = 0;
+ for( ;; )
+ {
+ /* Obtain a buffer that is at least xMaxStringLength characters big. The implementation 
+ of prvGetBuffer() is not shown – it might obtain the buffer from a pool of pre-allocated 
+ buffers, or just allocate the buffer dynamically. */
+ pcStringToSend = ( char * ) prvGetBuffer( xMaxStringLength );
+ /* Write a string into the buffer. */
+ snprintf( pcStringToSend, xMaxStringLength, "String number %d\r\n", xStringNumber );
+ /* Increment the counter so the string is different on each iteration of this task. */
+ xStringNumber++;
+ /* Send the address of the buffer to the queue that was created in Listing 52. The
+ address of the buffer is stored in the pcStringToSend variable.*/
+ xQueueSend( xPointerQueue, /* The handle of the queue. */
+ &pcStringToSend, /* The address of the pointer that points to the buffer. */
+ portMAX_DELAY );
+ } }
+
+/*Listing 54. Using a queue to receive a pointer to a buffer*/
+/* A task that receives the address of a buffer from the queue created in Listing 52, and 
+written to in Listing 53. The buffer contains a string, which is printed out. */
+void vStringReceivingTask( void *pvParameters )
+{
+char *pcReceivedString;
+ for( ;; )
+ {
+ /* Receive the address of a buffer. */
+ xQueueReceive( xPointerQueue, /* The handle of the queue. */
+ &pcReceivedString, /* Store the buffer’s address in pcReceivedString. */
+ portMAX_DELAY );
+ /* The buffer holds a string, print it out. */
+ vPrintString( pcReceivedString );
+ /* The buffer is not required any more - release it so it can be freed, or re-used. */
+ prvReleaseBuffer( pcReceivedString );
+ } }
+
+```
+
+使用队列来发送不同类型和长度的数据
+
+前面的部分演示了两种有力的设计模式；向队列发送结构，以及向队列发送指针。结合这些技术，允许任务使用单个队列来接收来自任何数据源的任何数据类型。FreeRTOS+TCPTCP/IP堆栈的实现提供了一个如何实现这一点的实际示例。
 
