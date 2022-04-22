@@ -2165,8 +2165,492 @@ IPStackEvent_t xReceivedEvent;
 
 队列集由句柄引用，它们是QueueSetHandle_t类型的变量。x查询创建集()API函数创建一个队列集，并返回一个引用它所创建的队列集的QueueSetHandle_t。
 
+**表23.xQueueCreateSet()参数和返回值**
+
 ```c
 /* xQueueCreateSet(）函数原型*/
 QueueSetHandle_t xQueueCreateSet( const UBaseType_t uxEventQueueLength );
 ```
 
+| **Parameter Name** | **Description**                                              |
+| ------------------ | ------------------------------------------------------------ |
+| uxEventQueueLength | 当作为队列集成员的队列接收数据时，接收队列的句柄将发送到队列集。uxEventQueueLength定义了正在创建的队列集随时都可以保存的最大队列句柄数。只有当队列集中的队列接收到数据时，队列句柄才会被发送到队列集。如果队列已满，则无法接收数据，因此，如果队列中的所有队列都已满，则不能将任何队列句柄发送到队列集。因此，队列集一次必须保持的最大项目数量是集合中每个队列的长度之和。例如，如果集合中有三个空队列，并且每个队列的长度为5，那么在集合中的所有队列都满之前，集合中的队列总共可以接收15个项目（每个队列乘以5个项目）。在该示例中，ux事件队列长度必须设置为15，以保证队列集可以接收到发送到它的每个项目。信号量也可以被添加到一个队列集中。二进制和计数信号量将在这本书的后面讨论。为了计算所需的uxEventQueueLength，二进制信号量的长度为1，计数信号量的长度由信号量的最大计数值给出。另一个例子是，如果一个队列集将包含一个长度为3的队列和一个二进制信号量（其长度为1），则uxEvent队列长度必须设置为4（3加1）。 |
+| Return Value       | 如果返回NULL，则无法创建队列集，因为没有足够的FReeRTOS堆内存来分配队列集数据结构和存储区域。返回的非NULL值表示队列集已创建成功。返回的值应该存储为已创建的队列集的句柄。 |
+
+**xQueueAddToSet() API 功能**
+
+xQueueAddToSet()将队列或信号量添加到队列集中。信号量在这本书的后面会有描述。
+
+```c
+/*Listing 61. The xQueueAddToSet() API function prototype*/
+BaseType_t xQueueAddToSet( QueueSetMemberHandle_t xQueueOrSemaphore,  QueueSetHandle_t xQueueSet );
+```
+
+**Table 24. xQueueAddToSet() 参数和返回值**
+
+| **Parameter Name** | **Description**                                              |
+| ------------------ | ------------------------------------------------------------ |
+| xQueueOrSemaphore  | 正在添加到队列集的队列或信号量的句柄。队列句柄和信号量句柄都可以被强制转换为QueueSetMemberHandle_t类型。 |
+| xQueueSet          | 要向其添加该队列或信号量的队列集的句柄。                     |
+| Return Value       | 有两个可能的返回值：1.pdPASS 只有当队列或信号量已成功添加到队列集时，才会返回PdPASS。2.pdFAIL 如果无法将队列或信号量添加到队列集中，则将返回PdFAIL。队列和二进制信号量只能在它们为空时被添加到一个集合中。计数信号量只能在其计数为零时才能添加到一个集合中。队列和信号量一次只能是一个集合的成员。 |
+
+**The xQueueSelectFromSet() API 功能**
+
+xQueueSelectFromSet() 从队列集中读取一个队列句柄。
+
+ 当作为集合成员的队列或信号接收数据时，接收队列或信号的句柄被发送到队列集，并在任务调用xQueueSelectFromSet()时返回，如果一个句柄从调用
+
+xQueueSelectFromSet() 然后就知道句柄引用的队列或信号量包含数据，然后调用任务必须直接从队列或信号量中读取。
+
+注意：不要从集合成员的队列或信号量读取数据，除非队列或信号量的句柄首先从调用xQueue选择fset()返回。每次从调用队列句柄或信号量句柄返回到ϟSet()时，只从队列或信号量中读取一个项。
+
+```c
+/*Listing 62. The xQueueSelectFromSet() API function prototype*/
+QueueSetMemberHandle_t xQueueSelectFromSet( QueueSetHandle_t xQueueSet,
+ const TickType_t xTicksToWait );
+```
+
+**Table 25. xQueueAddFromSet() 参数和返回值**
+
+| **Parameter Name** | **Description**                                              |
+| ------------------ | ------------------------------------------------------------ |
+| xQueueSet          | 正在接收到队列句柄或信号量句柄的队列集的句柄（正在读取）。队列集句柄将从用于创建队列集的xQueueCreateSet()的调用返回。 |
+| xTicksToWait       | 如果队列集中的所有队列和信号量都为空，则调用任务应保持在阻塞状态以等待从队列集中接收队列或信号量句柄的最长时间。如果xTicksToWait 为零，那么如果该集中的所有队列和信号量都为空，则xQueueSelectFromSet()将立即返回。阻塞时间以滴答周期指定，因此它所表示的绝对时间取决于滴答频率。宏pdMS_TO_TICKS()可用于将以毫秒为单位指定的时间转换为在刻度中指定的时间。如果INCLUDE_vTaskSuspend在FreeRTOSConfig.h中设置为1，则将xTicksTo等待设置为portMAX_DELAY将导致任务无限期等待（不超时）。 |
+| Return Value       | 非NULL的返回值将是已知包含数据的队列或信号量的句柄。如果指定了块时间(xTicksToWait不是零)，那么调用任务可能被放入阻塞状态，等待数据从集合中的队列或信号量中可用，但在阻塞时间过期之前成功从队列集读取句柄。句柄作为QueueSetMemberHandle_t类型返回，可以强制转换为QueueHandle_t类型或SemaphoreHandle_t类型。  如果返回值为NULL，则无法从队列集中读取句柄。如果指定了块时间(xTicksToWait不是零)，那么调用任务将被放置入阻塞状态，等待另一个任务或中断将数据发送到集中的队列或信号量，但在块时间发生之前过期。 |
+
+**例12.使用队列集**
+
+本示例中创建了两个发送任务和一个接收任务。发送任务在两个单独的队列上向接收任务发送数据，每个任务对应一个队列。这两个队列被添加到一个队列集中，并且接收任务从该队列集中读取，以确定这两个队列中的哪一个包含数据。任务、队列和队列集都是在main()中创建的——有关其实现，请参见Listing63。
+
+```c
+/*Listing 63. Implementation of main() for Example 12*/
+/* Declare two variables of type QueueHandle_t. Both queues are added to the same 
+queue set. */
+static QueueHandle_t xQueue1 = NULL, xQueue2 = NULL;
+/* Declare a variable of type QueueSetHandle_t. This is the queue set to which the 
+two queues are added. */
+static QueueSetHandle_t xQueueSet = NULL;
+int main( void )
+{
+ /* Create the two queues, both of which send character pointers. The priority 
+ of the receiving task is above the priority of the sending tasks, so the queues 
+ will never have more than one item in them at any one time*/
+ xQueue1 = xQueueCreate( 1, sizeof( char * ) );
+ xQueue2 = xQueueCreate( 1, sizeof( char * ) );
+ /* Create the queue set. Two queues will be added to the set, each of which can 
+ contain 1 item, so the maximum number of queue handles the queue set will ever 
+ have to hold at one time is 2 (2 queues multiplied by 1 item per queue). */
+ xQueueSet = xQueueCreateSet( 1 * 2 );
+ /* Add the two queues to the set. */
+ xQueueAddToSet( xQueue1, xQueueSet );
+ xQueueAddToSet( xQueue2, xQueueSet );
+ /* Create the tasks that send to the queues. */
+ xTaskCreate( vSenderTask1, "Sender1", 1000, NULL, 1, NULL );
+ xTaskCreate( vSenderTask2, "Sender2", 1000, NULL, 1, NULL );
+ /* Create the task that reads from the queue set to determine which of the two 
+ queues contain data. */
+ xTaskCreate( vReceiverTask, "Receiver", 1000, NULL, 2, NULL );
+ /* Start the scheduler so the created tasks start executing. */
+ vTaskStartScheduler();
+ /* As normal, vTaskStartScheduler() should not return, so the following lines 
+ Will never execute. */
+ for( ;; );
+ return 0;
+}
+```
+
+第一个发送任务使用xQueue1每100毫秒向接收任务发送一个字符指针。第二个发送任务使用xQueue2每200毫秒向接收任务发送一个字符指针。字符指针被设置为指向标识发送任务的字符串。这两个发送任务的实现如Listing64所示。
+
+```c
+/*Listing 64. The sending tasks used in Example 12*/
+void vSenderTask1( void *pvParameters )
+{
+const TickType_t xBlockTime = pdMS_TO_TICKS( 100 );
+const char * const pcMessage = "Message from vSenderTask1\r\n";
+ /* As per most tasks, this task is implemented within an infinite loop. */
+ for( ;; )
+ {
+ /* Block for 100ms. */
+ vTaskDelay( xBlockTime );
+ /* Send this task's string to xQueue1. It is not necessary to use a block 
+ time, even though the queue can only hold one item. This is because the 
+ priority of the task that reads from the queue is higher than the priority of 
+ this task; as soon as this task writes to the queue it will be pre-empted by 
+ the task that reads from the queue, so the queue will already be empty again 
+ by the time the call to xQueueSend() returns. The block time is set to 0. */
+ xQueueSend( xQueue1, &pcMessage, 0 );
+ } }
+/*-----------------------------------------------------------*/
+void vSenderTask2( void *pvParameters )
+{
+const TickType_t xBlockTime = pdMS_TO_TICKS( 200 );
+const char * const pcMessage = "Message from vSenderTask2\r\n";
+ /* As per most tasks, this task is implemented within an infinite loop. */
+ for( ;; )
+ {
+ /* Block for 200ms. */
+ vTaskDelay( xBlockTime );
+ /* Send this task's string to xQueue2. It is not necessary to use a block 
+ time, even though the queue can only hold one item. This is because the 
+ priority of the task that reads from the queue is higher than the priority of 
+ this task; as soon as this task writes to the queue it will be pre-empted by 
+ the task that reads from the queue, so the queue will already be empty again 
+ by the time the call to xQueueSend() returns. The block time is set to 0. */
+ xQueueSend( xQueue2, &pcMessage, 0 );
+ } }
+```
+
+发送任务写入的队列是同一队列集的成员。每次将任务发送到其中一个队列时，该队列的句柄都会被发送到该队列集。接收任务调用xQueueSelectFromSet()来从队列集读取队列句柄。接收任务从集合接收到队列句柄后，它知道接收到的句柄引用的队列包含数据，因此直接从队列中读取数据。它从队列读取的数据是指向字符串的指针，接收任务打印出来。
+
+如果调用xQueueSelectFromSet()超时，那么它将返回NULL。在示例12中，xQueueSelectFromSet()是用无限期的块时间调用的，所以永远不会超时，而且可以确保只返回一个有效的队列句柄。因此，接收任务不需要检查在使用返回值之前xquelemset()是否返回NULL。
+
+xQueueSelectFromSet()只有当队列句柄所引用的队列包含数据时，才会返回一个队列句柄，因此在从队列中读取时不需要使用块时间。
+
+接收任务的实现如清单65所示：
+
+```c
+void vReceiverTask( void *pvParameters )
+{
+QueueHandle_t xQueueThatContainsData;
+char *pcReceivedString;
+ /* As per most tasks, this task is implemented within an infinite loop. */
+ for( ;; )
+ {
+ /* Block on the queue set to wait for one of the queues in the set to contain data.
+ Cast the QueueSetMemberHandle_t value returned from xQueueSelectFromSet() to a 
+ QueueHandle_t, as it is known all the members of the set are queues (the queue set 
+ does not contain any semaphores). */
+ xQueueThatContainsData = ( QueueHandle_t ) xQueueSelectFromSet( xQueueSet,
+ portMAX_DELAY );
+ /* An indefinite block time was used when reading from the queue set, so
+ xQueueSelectFromSet() will not have returned unless one of the queues in the set 
+ contained data, and xQueueThatContainsData cannot be NULL. Read from the queue. It 
+ is not necessary to specify a block time because it is known the queue contains
+ data. The block time is set to 0. */
+ xQueueReceive( xQueueThatContainsData, &pcReceivedString, 0 );
+ /* Print the string received from the queue. */
+ vPrintString( pcReceivedString );
+ } }
+```
+
+图37显示了示例12所产生的输出。可以看出，接收任务从两个发送任务中都接收到字符串。发送任务1()使用的块时间是发送任务2()使用的块时间的一半，使得发送的字符串的频率是()发送的字符串的两倍。
+
+![image-20220422184714208](C:\Users\86178\Desktop\RTOS\${pic}\image-20220422184714208.png)
+
+更真实的队列集用例
+
+示例12演示了一个非常简单的情况；该队列集只包含队列，并且它所包含的两个队列都用于发送一个字符指针。在实际的应用程序中，队列集可能同时包含队列和信号量，而且队列可能不都包含相同的数据类型。在这种情况下，在使用返回的值之前，必须测试xQueueSelectFromSet()返回的值。清单66演示了当集合有以下成员时，如何使用从xQueueSelectFromSet()返回的值：
+
+1. 二进制信号量。
+2. 从中读取字符指针的队列。
+3. 从中读取uint32_t值的队列。
+
+清单66假定队列和信号量已经创建并添加到队列集中。
+
+```c
+/*Listing 66. Using a queue set that contains queues and semaphores*/
+/* The handle of the queue from which character pointers are received. */
+QueueHandle_t xCharPointerQueue;
+/* The handle of the queue from which uint32_t values are received. */
+QueueHandle_t xUint32tQueue;
+/* The handle of the binary semaphore. */
+SemaphoreHandle_t xBinarySemaphore;
+/* The queue set to which the two queues and the binary semaphore belong. */
+QueueSetHandle_t xQueueSet;
+void vAMoreRealisticReceiverTask( void *pvParameters )
+{
+QueueSetMemberHandle_t xHandle;
+char *pcReceivedString;
+uint32_t ulRecievedValue;
+const TickType_t xDelay100ms = pdMS_TO_TICKS( 100 );
+ for( ;; )
+ {
+ /* Block on the queue set for a maximum of 100ms to wait for one of the members of 
+ the set to contain data. */
+ xHandle = xQueueSelectFromSet( xQueueSet, xDelay100ms );
+ /* Test the value returned from xQueueSelectFromSet(). If the returned value is 
+ NULL then the call to xQueueSelectFromSet() timed out. If the returned value is not 
+ NULL then the returned value will be the handle of one of the set’s members. The 
+ QueueSetMemberHandle_t value can be cast to either a QueueHandle_t or a 
+ SemaphoreHandle_t. Whether an explicit cast is required depends on the compiler. */
+ if( xHandle == NULL )
+ {
+ /* The call to xQueueSelectFromSet() timed out. */
+ }
+ else if( xHandle == ( QueueSetMemberHandle_t ) xCharPointerQueue )
+ {
+ /* The call to xQueueSelectFromSet() returned the handle of the queue that 
+ receives character pointers. Read from the queue. The queue is known to contain 
+ data, so a block time of 0 is used. */
+ xQueueReceive( xCharPointerQueue, &pcReceivedString, 0 );
+ /* The received character pointer can be processed here... */
+ }
+ else if( xHandle == ( QueueSetMemberHandle_t ) xUint32tQueue )
+ {
+ /* The call to xQueueSelectFromSet() returned the handle of the queue that 
+ receives uint32_t types. Read from the queue. The queue is known to contain 
+ data, so a block time of 0 is used. */
+ xQueueReceive(xUint32tQueue, &ulRecievedValue, 0 );
+ /* The received value can be processed here... */
+ }
+ Else if( xHandle == ( QueueSetMemberHandle_t ) xBinarySemaphore )
+ {
+ /* The call to xQueueSelectFromSet() returned the handle of the binary semaphore. 
+ Take the semaphore now. The semaphore is known to be available so a block time 
+ of 0 is used. */
+ xSemaphoreTake( xBinarySemaphore, 0 );
+ /* Whatever processing is necessary when the semaphore is taken can be performed
+ here... */
+ }
+ } }
+```
+
+#### **4.7 使用队列来创建邮箱**  
+
+在嵌入式社区中，目前还没有就术语达成共识，而“邮箱”在不同的RTOS中意味着不同的东西。在本书中，术语邮箱用于指代长度为1的队列。队列可能被描述为邮箱是因为它在应用程序中使用的方式，而不是因为它与队列有功能差异：
+
+- 队列用于将数据从一个任务发送到另一个任务，或者从中断服务例程发送到一个任务。发送方将一个项目放在队列中，而接收方将从队列中删除该项目。数据通过队列从发送方传递到接收方。.
+- 邮箱用于保存可以由任何任务或任何中断服务例程读取的数据。由于邮箱存在，数据不会丢失，而是保留在邮箱中，直到它被覆盖。发件人将覆盖邮箱中的值。接收方会从邮箱中读取该值，但不会从邮箱中删除该值。
+
+本章介绍了允许将队列用作邮箱的两个队列API函数。
+
+Listing67显示了正在创建的用作邮箱的队列。
+
+```c
+/*Listing 67. A queue being created for use as a mailbox*/
+/* A mailbox can hold a fixed size data item. The size of the data item is set
+when the mailbox (queue) is created. In this example the mailbox is created to
+hold an Example_t structure. Example_t includes a time stamp to allow the data held 
+in the mailbox to note the time at which the mailbox was last updated. The time 
+stamp used in this example is for demonstration purposes only - a mailbox can hold 
+any data the application writer wants, and the data does not need to include a time 
+stamp. */
+typedef struct xExampleStructure
+{
+ TickType_t xTimeStamp;
+ uint32_t ulValue;
+} Example_t;
+/* A mailbox is a queue, so its handle is stored in a variable of type
+QueueHandle_t. */
+QueueHandle_t xMailbox;
+void vAFunction( void )
+{
+ /* Create the queue that is going to be used as a mailbox. The queue has a 
+ length of 1 to allow it to be used with the xQueueOverwrite() API function, which 
+ is described below. */
+ xMailbox = xQueueCreate( 1, sizeof( Example_t ) );
+}
+```
+
+ **xQueueOverwrite() API 功能**
+
+就像xQueueSendToBack()API函数，函数将数据发送到一个队列。与xQueueSendToBack（）不同，如果队列已经满，那么 xQueueOverwrite()将覆盖已经在队列中的数据。
+
+xQueueOverwrite() 应该只用于长度为1的队列。该限制避免了函数的实现需要在队列已满的情况下，任意决定要覆盖队列中的哪个项。
+
+注意：永远不要从中断服务例程中调用xQueueOverwrite() 。应该使用xQueueOverwriteFromISR()来代替它。
+
+表26.xQueueOverwrite()参数和返回值
+
+| **Parameter Name/**Returned Value | **Description**                                              |
+| --------------------------------- | ------------------------------------------------------------ |
+| xQueue                            | 要发送数据（写入）的队列的句柄。队列句柄将已从对用于创建队列的xQueueCreate()的调用中返回 |
+| pvItemToQueue                     | 一个指向要复制到队列中的数据的指针。队列可以保存的每个项是在创建队列时设置的大小，因此这些字节将从pvItemto队列复制到队列存储区域 |
+| Returned value                    | xQueueOverwrite()即使队列已满，也会写入队列，所以pdPASS是唯一可能的返回值。 |
+
+Listing 69显示了用于写入在Listing 67中创建的邮箱（队列）的x查询覆盖()。
+
+```c
+/*Listing 69. Using the xQueueOverwrite() API function*/
+void vUpdateMailbox( uint32_t ulNewValue )
+{
+/* Example_t was defined in Listing 67. */
+Example_t xData;
+ /* Write the new data into the Example_t structure.*/
+ xData.ulValue = ulNewValue;
+ /* Use the RTOS tick count as the time stamp stored in the Example_t structure. */
+ xData.xTimeStamp = xTaskGetTickCount();
+ /* Send the structure to the mailbox - overwriting any data that is already in the 
+ mailbox. */
+ xQueueOverwrite( xMailbox, &xData );
+}
+```
+
+**xQueePeek() API功能**
+
+xQueuePeek() 用于从队列中接收（读取）中的项目，而不会从队列中删除该项目。xQueuePeek()从队列的报头接收数据，而不修改存储在队列中的数据，或数据存储在队列中的顺序。
+
+注意：永远不要从中断服务例程调用xQueuePeek()。应该使用xQueuePeekFromISR()来代替它。
+
+xQueuePeek()具有相同的函数参数和返回值xQueueReceive();
+
+```c
+/*Listing 70. The xQueuePeek() API function prototype*/
+BaseType_t xQueuePeek( QueueHandle_t xQueue,
+ void * const pvBuffer,
+ TickType_t xTicksToWait );
+```
+
+Listing 71显示了xQueuePeek()被用于接收发布到Listing 69中的邮箱（队列）的项目。
+
+```c
+/*Listing 71. Using the xQueuePeek() API function*/
+BaseType_t vReadMailbox( Example_t *pxData ) {
+TickType_t xPreviousTimeStamp;
+BaseType_t xDataUpdated;
+ /* This function updates an Example_t structure with the latest value received 
+ from the mailbox. Record the time stamp already contained in *pxData before it 
+ gets overwritten by the new data. */
+ xPreviousTimeStamp = pxData->xTimeStamp;
+ /* Update the Example_t structure pointed to by pxData with the data contained in
+ the mailbox. If xQueueReceive() was used here then the mailbox would be left 
+ empty, and the data could not then be read by any other tasks. Using 
+ xQueuePeek() instead of xQueueReceive() ensures the data remains in the mailbox.
+ A block time is specified, so the calling task will be placed in the Blocked 
+ state to wait for the mailbox to contain data should the mailbox be empty. An
+ infinite block time is used, so it is not necessary to check the value returned 
+ from xQueuePeek(), as xQueuePeek() will only return when data is available. */
+ xQueuePeek( xMailbox, pxData, portMAX_DELAY );
+ /* Return pdTRUE if the value read from the mailbox has been updated since this 
+ function was last called. Otherwise return pdFALSE. */
+ if( pxData->xTimeStamp > xPreviousTimeStamp )
+ {
+ xDataUpdated = pdTRUE;
+ }
+ else
+ {
+ xDataUpdated = pdFALSE;
+ }
+ return xDataUpdated;
+}
+```
+
+### 5.软件定时器管理
+
+#### 5.1章节介绍及范围
+
+软件计时器用于在未来设定的时间，或以固定的频率定期安排功能的执行。由软件计时器执行的函数称为软件计时器的回调函数。软件计时器由FreeRTOS内核实现，并在其控制之下。它们不需要硬件支持，也与硬件计时器或硬件计数器无关。请注意，根据FreeRTOS使用创新设计以确保最大效率的理念，软件计时器不使用任何处理时间，除非软件计时器回调函数实际执行。
+
+软件计时器功能是可选的。要包括软件计时器功能：
+
+1. 构建 FreeRTOS/Source/timers.c 作为项目的一部分。
+2. 在FreeRTOSConfig.h中将configUSE_TIMERS设置为1。
+
+**Scope**
+
+本章旨在让读者能够很好地理解：
+
+1. 将软件计时器的特性与任务的特性相比较。
+2. RTOS守护进程任务。
+3. 计时器命令队列。
+4. 一次性软件计时器和周期性软件计时器之间的区别。
+5. 如何创建、启动、重置和更改一个软件计时器的时间周期。
+
+#### 5.2软件计时器回调功能
+
+软件计时器回调函数被实现为C函数。它们唯一的特别之处在于它们的原型，它必须返回void，并将一个软件计时器的句柄作为其唯一的参数。回调函数原型如清单72所示：
+
+```c
+Listing 72. The software timer callback function prototype
+void ATimerCallback( TimerHandle_t xTimer );
+```
+
+软件计时器回调函数从开始到尾执行，并以正常方式退出。它们应保持短距离，并且不能进入阻塞状态。
+
+注意：正如将看到的，软件计时器回调函数在FreeRTOS调度程序启动时自动创建的任务上下文中执行。因此，软件计时器回调函数必须不能调用导致调用任务进入阻塞状态FrereRTOSAPI函数。可以调用函数如*xQueueReceive()*，但只有当函数的xTicksToWait参数（指定函数的块时间）设置为0。调用像vTaskDelay()这样的函数是不允许的，因为调用vTaskDelay()总是会将调用任务置于阻塞状态。
+
+#### 5.3软件计时器的属性和状态
+
+**软件计时器的时间周期**
+
+软件计时器的“周期”是指从软件计时器被启动到软件计时器的回调函数被执行之间的时间。
+
+**一次性和自动重新加载计时器**
+
+软件计时器有两种类型：
+
+1. 一次性计时器：一旦启动，一个一次性计时器将只执行一次回调函数。一次性计时器可以手动重新启动，但不会重新启动。
+2. 自动重新加载计时器：一旦启动，一个自动重新加载计时器将在每次过期时重新启动自己，从而导致定期执行其回调函数。
+
+图38显示了一次性计时器和自动重新加载计时器之间的行为差异。虚线表示了滴答中断发生的时间。
+
+![image-20220422194538489](C:\Users\86178\Desktop\RTOS\${pic}\image-20220422194538489.png)
+
+计时器1是一个一次性计时器，周期为6次。它在时间t1开始，所以它的回调函数在时间t7之后执行6个标记。由于计时器1是一次性计时器，所以它的回调函数不会再次执行。
+
+定时器2计时器2是一个自动重新加载的计时器，其周期为5个刻度。它在时间t1开始，所以它的回调函数在时间t1之后每5次标记执行一次。在图38中，这是在时刻t6、t11和t16。
+
+**软件计时器状态**
+
+软件计时器可以处于以下两种状态之一：
+
+- 休眠  休眠的软件计时器存在，并且可以被它的句柄引用，但没有运行，因此它的回调函数将不会执行。
+- 运行中 运行软件计时器将在进入运行状态或软件计时器后执行其回调函数。
+
+图39和图40分别显示了自动重新加载计时器和一次性计时器的休眠状态和运行状态之间的可能转换。这两个图之间的关键区别是在计时器过期后输入的状态；自动重新加载计时器执行它的回调函数，然后重新进入运行状态，一次性计时器执行它的回调函数，然后进入休眠状态。
+
+ xTimerDelete()API函数将删除一个计时器。一个定时器可以随时被删除。
+
+![image-20220422195037617](C:\Users\86178\Desktop\RTOS\${pic}\image-20220422195037617.png)
+
+#### 5.4一个软件计时器的上下文
+
+**RTOS守护进程（计时器服务）任务**
+
+所有软件定时器回调函数都在同一个RTOS守护进程（或“定时器服务”）任务的上下文中执行。
+
+守护进程任务是一个标准的FreeRTOS任务，它在调度程序启动时自动创建。它的优先级和堆栈大小分别由configTIMER_TASK_PRIORITY和configTIMER_TASK_STACK_DEPTH编译时配置常量设置。这两个常量都是在FreeRTOSConfig.h中定义的。
+
+软件定时器回调函数不能调用会导致调用任务进入阻塞状态的函数FreeRTOSSAPI，因为这样做将导致守护进程任务进入阻塞状态。
+
+**计时器命令队列**
+
+软件计时器API函数将来自调用任务的命令发送到一个名为“计时器命令队列”的队列上的守护进程任务。这一点如图41所示。命令的例子包括“启动计时器”、“停止计时器”和“重置计时器”。
+
+计时器命令队列是一个标准的FreeRTOS队列，它在调度程序启动时自动创建。计时器命令队列的长度是由FreeRTOSConfig.h中的configTIMER_QUEUE_LENGTH编译时配置常量设置的。
+
+![image-20220422201710443](C:\Users\86178\Desktop\RTOS\${pic}\image-20220422201710443.png)
+
+**守护进程任务调度**
+
+守护进程任务像任何其他FreeRTOS任务一样被调度；当它是能够运行的最高优先级任务时，它只会处理命令，或执行计时器回调函数。图42和图43演示了配置TIMER_TASK_PRIORITY设置如何影响执行模式。
+
+Figure 42 s当守护进程任务的优先级低于调用xTimerStart()API函数的任务的优先级时，显示执行模式。
+
+![image-20220422202017363](C:\Users\86178\Desktop\RTOS\${pic}\image-20220422202017363.png)
+
+参见图42，其中Task1的优先级高于守护任务的优先级，守护任务的优先级高于空闲任务的优先级：
+
+1.在时间t1
+
+任务1处于“运行”状态，守护进程任务处于“阻止”状态。如果一个命令被发送到计时器命令队列，守护进程任务将离开阻塞状态，在这种情况下，它将处理该命令，或者如果一个软件计时器过期，在这种情况下，它将执行软件计时器的回调函数。
+
+2.在时间t2
+
+任务1调用xTimer开始()。
+
+xTimerStart()向定时器命令队列发送命令，导致守护进程任务离开“阻止”状态。任务1的优先级高于守护进程任务的优先级，因此守护进程任务不会使任务任务成为优先级1。任务1仍处于“运行”状态，守护进程任务已离开“阻止”状态并进入“就绪”状态。
+
+3.在时间t3，任务1完成执行xTimerStart()API函数。任务1执行了xTimerStart()，从函数开始到函数结束，而不离开运行状态。
+
+4.在时间t4，任务1调用一个API函数，导致它进入阻塞状态。守护进程任务现在是处于已就绪状态下的最高优先级任务，因此调度程序选择守护进程任务作为进入正在运行状态的任务。然后，守护进程任务开始处理由任务1发送到计时器命令队列的命令。
+
+注意：启动软件计时器将过期的时间是从“启动计时器”命令发送到计时器命令队列开始计算的——它不是从守护进程任务从计时器命令队列收到“启动计时器”命令开始计算的。
+
+5.在时间t5，守护进程任务已经完成了由任务1发送给它的命令的处理，并尝试从计时器命令队列接收更多的数据。计时器命令队列为空，因此守护进程任务将重新进入“已阻止”状态。如果命令发送到定时器命令队列，或者软件定时器过期，守护进程任务将再次离开“阻止”状态。空闲任务现在是处于“就绪”状态下的最高优先级任务，因此调度程序选择空闲任务作为进入“正在运行”状态的任务。
+
+图43显示了与图42所示的类似场景，但这次守护进程任务的优先级高于调用xTimerStart()的任务的优先级。
+
+![image-20220422214742013](C:\Users\86178\Desktop\RTOS\${pic}\image-20220422214742013.png)
+
+参见图43，其中守护进程任务的优先级高于任务1的优先级，任务1的优先级高于空闲任务的优先级：
+
+1.在时间t1，与前面一样，任务1处于“运行”状态，守护进程任务处于“阻止”状态。
+
+2.在时间t2，Task 1 调用xTimerStart(). xTimerStart()向定时器命令队列发送命令，导致守护进程任务离开“阻止”状态。守护进程任务的优先级高于任务1的优先级，因此调度程序选择守护进程任务作为进入正在运行的状态的任务。任务1在完成执行xTimerStart()函数之前已被守护进程任务抢占，现在处于“就绪”状态。守护进程任务开始处理由任务1发送到计时器命令队列的命令。
+
+3.在时间t3，守护进程任务已经完成了由任务1发送给它的命令的处理，并尝试从计时器命令队列接收更多的数据。定时器命令队列为空，因此守护进程任务重新进入“已阻止”状态。任务1现在是处于“已就绪”状态下的最高优先级任务，因此调度程序选择任务1作为要进入“正在运行”状态的任务。
+
+
+
+4.在时间t4，任务1在完成执行xTimerStart()函数之前已经被守护程序任务抢占，并且只在重新进入运行状态后退出（返回）xTimerStart()。
